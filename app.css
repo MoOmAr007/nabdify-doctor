@@ -236,3 +236,8 @@ svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width:
 #toast { position: fixed; bottom: calc(100px + env(safe-area-inset-bottom)); left: 50%; transform: translate(-50%, 20px); opacity: 0; z-index: 60; pointer-events: none;
   background: var(--t); color: var(--bg); padding: 10px 16px; border-radius: 14px; font-size: 13px; font-weight: 600; transition: all .25s; max-width: 90%; text-align: center; }
 #toast.show { opacity: 1; transform: translate(-50%, 0); } #toast.bad { background: var(--red); color: #fff; }
+/* ملخص الصبح، أزرار بأيقونات، الإملاء */
+.summary { display: flex; flex-direction: column; gap: 6px; font-size: 14px; line-height: 1.7; border-color: rgba(var(--a-rgb), .35); }
+.btn svg, .act svg, .tr span svg { width: 17px; height: 17px; vertical-align: -3px; margin-inline-end: 4px; }
+.btn.rec { background: var(--redbg); color: var(--red); border-color: rgba(255,107,107,.4); }
+a.btn { display: block; text-decoration: none; }

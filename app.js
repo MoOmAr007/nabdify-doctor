@@ -22,12 +22,22 @@ const store = {
   set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
   del: (k) => { try { localStorage.removeItem(k); } catch {} },
 };
-const S = { session: store.get('session'), tab: 'day', date: today(), q: '', patient: null, ptab: 'plan', range: 'day' };
+// أكتر من عيادة: كل عيادة ليها دخول لوحدها، والدكتور بيبدّل بينهم من "حسابي"
+const ACC = {
+  list: () => { const l = store.get('sessions'); if (Array.isArray(l)) return l; const old = store.get('session'); return old ? [old] : []; },
+  save: (l) => { store.set('sessions', l); store.del('session'); },
+  key: (x) => `${x.clinic}|${x.name}`,
+};
+const S = { session: ACC.list()[store.get('current') || 0] || ACC.list()[0] || null, tab: 'day', date: today(), q: '', patient: null, ptab: 'plan', range: 'day' };
+function useSession(sess) {
+  const l = ACC.list().filter((x) => ACC.key(x) !== ACC.key(sess)); l.unshift(sess); ACC.save(l); store.set('current', 0);
+  S.session = sess; S.patient = null; S.tab = 'day'; SYNC.at = null; SYNC.checked = 0;
+}
 
 // آخر نتيجة لكل طلب بتتحفظ على الموبايل، فلو النت قطع بنعرضها ومعاها تنبيه
 async function api(action, data = {}) {
   if (DEMO) return demo(action, data);
-  const key = `cache:${action}:${JSON.stringify(data)}`;
+  const key = `cache:${S.session?.clinic || ''}:${action}:${JSON.stringify(data)}`;
   let r;
   try {
     r = await fetch(FN, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(S.session ? { Authorization: `Bearer ${S.session.token}` } : {}) },
@@ -45,9 +55,12 @@ async function api(action, data = {}) {
   if (action !== 'login' && action !== 'ping') store.set(key, body);
   return body;
 }
+// خروج من العيادة الحالية بس (لو فيه عيادة تانية بنرجعلها)
 function logout() {
-  S.session = null; store.del('session');
-  try { Object.keys(localStorage).filter((k) => k.startsWith('cache:')).forEach((k) => localStorage.removeItem(k)); } catch {}
+  const cur = S.session;
+  try { Object.keys(localStorage).filter((k) => k.startsWith(`cache:${cur?.clinic || ''}:`)).forEach((k) => localStorage.removeItem(k)); } catch {}
+  const rest = ACC.list().filter((x) => !cur || ACC.key(x) !== ACC.key(cur)); ACC.save(rest); store.set('current', 0);
+  S.session = rest[0] || null; S.patient = null; S.tab = 'day';
   render();
 }
 
@@ -102,6 +115,11 @@ const IC = {
   plus: svg('<path d="M12 5v14M5 12h14"/>'),
   x: svg('<path d="M6 6l12 12M18 6L6 18"/>'),
   check: svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
+  finger: svg('<path d="M12 11v3a6 6 0 0 1-1 3.5M8.5 8.5A4 4 0 0 1 16 11v1.5M6 12v-1a6 6 0 0 1 11.6-2.2M18 14.5a13 13 0 0 1-1 4.5M9 15a10 10 0 0 1-1.5 4M5.5 16.5A10 10 0 0 0 6 13"/>'),
+  spark: svg('<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>'),
+  mic: svg('<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/>'),
+  bell: svg('<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/>'),
+  file: svg('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>'),
   call: svg('<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/>'),
   sync: svg('<path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/>'),
   th_light: svg('<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4L6 18M18 6l1.4-1.4"/>'),
@@ -111,12 +129,12 @@ const IC = {
 
 // ---------- الدخول ----------
 function renderLogin() {
-  const last = store.get('last_login') || {};
+  const last = S.adding ? {} : store.get('last_login') || {};
   // نصحّي السيرفر وهو بيكتب البيانات، عشان أول دخول ما ياخدش وقت
   if (!DEMO) fetch(FN, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"action":"ping"}' }).catch(() => {});
   $('#app').innerHTML = `<div class="login fade">
     <img class="wordmark wm-dark" src="logo-white.svg" alt="Nabdify"><img class="wordmark wm-light" src="logo-dark-text.svg" alt="Nabdify">
-    <div class="tag">عيادتك في جيبك</div>
+    <div class="tag">${S.adding ? 'إضافة عيادة تانية' : 'نبض كل عيادة'}</div>
     <form class="glass" id="lf">
       <label>إيميل العيادة</label><input name="email" type="email" class="ltr" autocomplete="username" value="${esc(last.email || '')}" required>
       <label>اسم المستخدم</label><input name="username" class="ltr" autocapitalize="off" value="${esc(last.username || '')}" required>
@@ -124,15 +142,18 @@ function renderLogin() {
       <button class="btn" id="lb">دخول</button>
       <div class="err" id="le"></div>
     </form>
-    <div class="note">للدكاترة بس، بنفس يوزر وباسورد البرنامج<br>بتفضل داخل 7 أيام</div></div>`;
+    <div class="note">للدكاترة بس، بنفس يوزر وباسورد البرنامج<br>بتفضل داخل 7 أيام (ومع البصمة على طول)</div>
+    ${S.adding ? '<button class="btn soft" id="lf-back" style="margin-top:6px">رجوع</button>' : ''}</div>`;
+  if ($('#lf-back')) $('#lf-back').onclick = () => { S.adding = false; render(); };
   $('#lf').onsubmit = async (e) => {
     e.preventDefault();
     const f = Object.fromEntries(new FormData(e.target));
     $('#lb').disabled = true; $('#lb').textContent = 'بيدخل…'; $('#le').textContent = '';
     try {
       const r = await api('login', f);
-      S.session = { token: r.token, name: r.name, clinic: r.clinic };
-      store.set('session', S.session); store.set('last_login', { email: f.email, username: f.username });
+      useSession({ token: r.token, name: r.name, clinic: r.clinic, at: Date.now() });
+      store.set('last_login', { email: f.email, username: f.username });
+      S.adding = false;
       render();
     } catch (err) { $('#le').textContent = err.message; $('#lb').disabled = false; $('#lb').textContent = 'دخول'; }
   };
@@ -165,7 +186,8 @@ const failed = (e) => `<div class="empty">${esc(e.message)}<br><br><button class
 const flag = (t) => (t ? `<div><span class="flag">${IC.alert}${esc(t.replace(/^⚠\s*/, ''))}</span></div>` : '');
 
 function render() {
-  if (!S.session) return renderLogin();
+  if (!S.session || S.adding) return renderLogin();
+  if (LOCK.enabled() && !LOCK.open) return renderLock();
   if (S.patient) return renderPatient();
   ({ day: renderDay, patients: renderPatients, money: renderMoney, me: renderMe })[S.tab]();
 }
@@ -198,6 +220,7 @@ async function renderDay(quiet) {
       ${doctors.length > 1 ? `<div class="filters"><button data-doc="" class="${S.doc ? '' : 'on'}">كل الدكاترة</button>${doctors.map((d) => `<button data-doc="${esc(d)}" class="${S.doc === d ? 'on' : ''}">${esc(d)}</button>`).join('')}</div>` : ''}
       <div class="stats"><div class="stat glass hl"><b>${num(items.length)}</b><span>موعد</span></div><div class="stat glass"><b>${num(c('waiting'))}</b><span>منتظر</span></div>
         <div class="stat glass"><b>${num(c('inside'))}</b><span>جوه</span></div><div class="stat glass"><b>${num(c('done'))}</b><span>خلص</span></div></div>
+      ${date === today() ? '<div id="summary"></div>' : ''}
       <button class="btn small" id="d-book" style="align-self:flex-start">+ حجز موعد</button>
       ${items.length ? `<div class="timeline">${items.map((a) => `<button class="slot s-${a.status}" data-a="${esc(a.id)}">
         <div class="tm">${fmtTime(a.time)} <span class="muted">${ampm(a.time)}</span><small>${esc(a.chair || '')}</small></div><div class="rail"><i></i></div>
@@ -206,6 +229,7 @@ async function renderDay(quiet) {
         : `<div class="empty">${S.doc ? 'مفيش مواعيد للدكتور ده في اليوم ده' : 'مفيش مواعيد في اليوم ده'}</div>`}`;
     $$('[data-a]').forEach((b) => (b.onclick = () => apptSheet(all.find((a) => a.id === b.dataset.a))));
     $('#d-book').onclick = () => bookSheet({ date: S.date });
+    if (!quiet) morningCard();
     $$('[data-doc]').forEach((b) => (b.onclick = () => { S.doc = b.dataset.doc || null; renderDay(true); }));
   } catch (e) { if (!quiet) $('#main').innerHTML = failed(e); }
 }
@@ -250,7 +274,7 @@ async function renderPatient() {
     $('.top').innerHTML = `${backBtn}<div class="hero fade"><div class="av">${esc(initials(p.name))}</div>
       <div><h1>${esc(p.name)}</h1><div class="meta">ملف #${esc(p.file_no)}${p.age ? ` · ${num(p.age)} سنة` : ''}${p.phone ? ` · <span class="ltr">${esc(p.phone)}</span>` : ''}</div></div></div>`;
     bindBack();
-    const tabs = { plan: 'الخطة', sessions: 'الجلسات', rx: 'الروشتات', visits: 'المواعيد' };
+    const tabs = { plan: 'الخطة', sessions: 'الجلسات', rx: 'الروشتات', files: 'الأشعات', visits: 'المواعيد' };
     const date = (s) => fmtDate(s, { day: 'numeric', month: 'short', year: 'numeric' });
     const body = {
       plan: () => (d.treatments.length ? d.treatments.map((t) => `<div class="tr"><div><b>${esc(t.description)}${t.tooth ? ` <span class="muted">· سنة ${esc(t.tooth)}</span>` : ''}</b>
@@ -263,6 +287,7 @@ async function renderPatient() {
       rx: () => (d.prescriptions.length ? d.prescriptions.map((r) => `<div class="item"><div class="d">${date(r.date)}</div>
           ${(r.items || []).map((x) => `<div class="rx">${IC.pill}<div><b>${esc(x.name)}</b> <span class="muted">${esc([x.dose, x.frequency, x.duration].filter(Boolean).join(' · '))}</span></div></div>`).join('')}
           ${r.instructions ? `<div class="muted" style="white-space:pre-line;margin-top:4px">${esc(r.instructions)}</div>` : ''}</div>`).join('') : '<div class="empty">مفيش روشتات</div>'),
+      files: () => '<div id="files-body"></div>',
       visits: () => (d.appointments.length ? d.appointments.slice(0, 30).map((a) => `<div class="tr"><div><b>${date(a.date)}</b>
           <div class="muted">${fmtTime(a.time)} ${ampm(a.time)}${a.service ? ` · ${esc(a.service)}` : ''}</div></div><span class="st st-${a.status}">${STATUS[a.status] || 'ملغي'}</span></div>`).join('') : '<div class="empty">مفيش مواعيد</div>'),
     };
@@ -271,7 +296,7 @@ async function renderPatient() {
       const wa = (p.phone || '').replace(/\D/g, '').replace(/^0/, '20');
       $('#main').innerHTML = `
         ${p.phone ? `<div class="actions"><a class="act glass" href="tel:${esc(p.phone)}">${IC.call}اتصال</a>
-          <a class="act glass" href="https://wa.me/${wa}" target="_blank" rel="noopener">${IC.chat}واتساب</a></div>` : ''}
+          <button class="act glass" id="p-wa">${IC.chat}واتساب</button></div>` : ''}
         ${p.alert ? `<div class="alertbox glass fade">${IC.alert}<div><b>تنبيهات طبية</b>${esc(p.alert.replace(/^⚠\s*/, ''))}${p.medications ? `<br>بياخد: ${esc(p.medications)}` : ''}</div></div>` : ''}
         <div class="glass card fade"><div class="tr"><span class="lbl">الموعد الجاي</span><b>${upcoming ? `${fmtDate(upcoming.date, { weekday: 'short', day: 'numeric', month: 'short' })} · ${fmtTime(upcoming.time)} ${ampm(upcoming.time)}` : '—'}</b></div>
           <div class="tr"><span class="lbl">عليه</span><b class="${d.balance > 0.001 ? 'owe' : ''}">${d.balance > 0.001 ? money(d.balance) : 'مفيش'}</b></div></div>
@@ -281,6 +306,8 @@ async function renderPatient() {
         ${p.notes ? `<div class="glass card"><span class="muted">ملاحظات</span><div style="margin-top:4px">${esc(p.notes)}</div></div>` : ''}`;
       $$('[data-pt]').forEach((b) => (b.onclick = () => { S.ptab = b.dataset.pt; draw(); }));
       $('#p-book').onclick = () => bookSheet({ patient: { id: S.patient, name: p.name } });
+      if ($('#p-wa')) $('#p-wa').onclick = () => waSheet(p.name, p.phone, upcoming);
+      if (S.ptab === 'files') filesBody($('#files-body'), S.patient);
       $('#p-sess').onclick = () => sessionSheet(S.patient, d.treatments.filter((t) => t.status !== 'done'));
       $('#p-rx').onclick = () => rxSheet(S.patient);
     };
@@ -291,9 +318,10 @@ async function renderPatient() {
 // ---------- الفلوس ----------
 async function renderMoney() {
   const RANGES = { day: 'النهارده', week: 'الأسبوع', month: 'الشهر' };
-  shell(`<div class="eyebrow">الفلوس</div><h1>الإيراد</h1>`,
+  shell(`<div class="eyebrow">الفلوس</div><h1>الإيراد</h1>` + `<button class="btn small soft" id="m-ask" style="margin-top:8px">${IC.spark}اسأل عيادتك</button>`,
     `<div class="seg glass">${Object.entries(RANGES).map(([k, v]) => `<button data-r="${k}" class="${S.range === k ? 'on' : ''}">${v}</button>`).join('')}</div><div id="mm" style="display:contents">${loading(2)}</div>`);
   $$('[data-r]').forEach((b) => (b.onclick = () => { S.range = b.dataset.r; renderMoney(); }));
+  $('#m-ask').onclick = askSheet;
   const to = today();
   const from = S.range === 'day' ? to : S.range === 'week' ? addDays(to, -6) : `${to.slice(0, 8)}01`;
   const chartFrom = S.range === 'month' ? from : addDays(to, -6);
@@ -324,8 +352,16 @@ async function renderMoney() {
 function renderMe() {
   shell(`<div class="eyebrow">حسابي</div><h1>${esc(S.session.name)}</h1>`, `
     <div class="glass card fade"><div class="tr"><span class="lbl">العيادة</span><b>${esc(S.session.clinic)}</b></div>
-      <div class="tr"><span class="lbl">الصلاحية</span><b>عرض بس</b></div>
       <div class="tr"><span class="lbl">آخر مزامنة من العيادة</span><b>${SYNC.at ? new Date(SYNC.at).toLocaleString('ar-EG', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '—'}</b></div></div>
+    <div class="section"><span>العيادات</span></div>
+    <div class="list glass">${ACC.list().map((x, i) => `<button class="prow" data-acc="${i}"><div class="av">${esc(initials(x.clinic))}</div>
+      <div class="who"><b>${esc(x.clinic)}</b><span>${esc(x.name)}</span></div>${ACC.key(x) === ACC.key(S.session) ? `<span class="st st-done">الحالية</span>` : ''}</button>`).join('')}
+      <button class="prow" id="acc-add"><div class="av">+</div><div class="who"><b>إضافة عيادة تانية</b><span>لو بتشتغل في أكتر من عيادة</span></div></button></div>
+    <div class="section"><span>الأمان والتنبيهات</span></div>
+    <div class="glass card">
+      ${LOCK.supported() ? `<div class="tr"><span>${IC.finger} القفل بالبصمة أو الوش</span><button class="btn small ${LOCK.enabled() ? 'soft' : ''}" id="t-lock">${LOCK.enabled() ? 'شغال — إيقاف' : 'تشغيل'}</button></div>` : ''}
+      ${PUSH.supported() ? `<div class="tr"><span>${IC.bell} إشعارات (مريض وصل، حجز، إلغاء)</span><button class="btn small ${PUSH.on() ? 'soft' : ''}" id="t-push">${PUSH.on() ? 'شغالة — إيقاف' : 'تشغيل'}</button></div>`
+        : '<div class="muted">الإشعارات محتاجة تثبّت الأبلكيشن على الشاشة الرئيسية الأول (وعلى الآيفون iOS 16.4 أو أحدث).</div>'}</div>
     <div class="section"><span>الشكل</span></div>
     <div class="seg glass">${Object.entries(THEMES).map(([k, v]) => `<button data-th="${k}" class="${theme() === k ? 'on' : ''}" aria-label="${v}" title="${v}">${themeIcon(k)}</button>`).join('')}</div>
     <div class="glass card note">الأبلكيشن بيعرض آخر بيانات وصلت من برنامج العيادة. لو الكمبيوتر مقفول أو مفيش نت في العيادة، هتشوف آخر تحديث بس.<br>
@@ -339,6 +375,17 @@ function renderMe() {
     setTimeout(() => { if (b.isConnected) { delete b.dataset.sure; b.textContent = 'تسجيل خروج'; } }, 4000);
   };
   $$('[data-th]').forEach((b) => (b.onclick = () => { store.set('theme', b.dataset.th); applyTheme(b.dataset.th); renderMe(); }));
+  $$('[data-acc]').forEach((b) => (b.onclick = () => { useSession(ACC.list()[+b.dataset.acc]); LOCK.open = false; render(); }));
+  $('#acc-add').onclick = () => { S.adding = true; render(); };
+  if ($('#t-lock')) $('#t-lock').onclick = async () => {
+    try { if (LOCK.enabled()) { LOCK.disable(); toast('القفل اتشال'); } else { await LOCK.enable(); toast('القفل اشتغل — الأبلكيشن هيفتح بالبصمة'); } renderMe(); }
+    catch { toast('الموبايل ما وافقش على البصمة', true); }
+  };
+  if ($('#t-push')) $('#t-push').onclick = async (e) => {
+    e.target.disabled = true;
+    try { if (PUSH.on()) { await PUSH.disable(); toast('الإشعارات اتقفلت'); } else { await PUSH.enable(); toast('الإشعارات اشتغلت'); } renderMe(); }
+    catch (ex) { e.target.disabled = false; toast(ex.message, true); }
+  };
 }
 
 // ---------- الكتابة من الموبايل (المرحلة التانية) ----------
@@ -377,6 +424,7 @@ function apptSheet(a) {
       ${['booked', 'waiting'].includes(a.status) ? '<button class="btn soft" id="as-move">تأجيل</button>' : ''}
       ${a.status === 'inside' || a.status === 'done' ? '<button class="btn soft" id="as-sess">تسجيل جلسة</button>' : ''}
       <button class="btn soft" id="as-file">ملف المريض</button>
+      ${a.phone ? '<button class="btn soft" id="as-wa">واتساب</button>' : ''}
       ${['booked', 'waiting'].includes(a.status) ? '<button class="btn soft danger" data-st="cancelled">إلغاء الموعد</button>' : ''}
     </div>`);
   $$('[data-st]', el).forEach((b) => (b.onclick = async () => {
@@ -391,6 +439,7 @@ function apptSheet(a) {
     sessionSheet(a.patient_id, d.treatments.filter((t) => t.status !== 'done'), a.id);
   };
   $('#as-file', el).onclick = () => { closeSheet(); openPatient(a.patient_id); };
+  if ($('#as-wa', el)) $('#as-wa', el).onclick = () => waSheet(a.patient, a.phone, a);
 }
 
 // الحجز والتأجيل: مريض ← خدمة ← يوم ← ساعة فاضية
@@ -411,8 +460,20 @@ async function bookSheet({ patient, move, date }) {
     $('#bk-p', el).innerHTML = f.patient ? `<div class="prow glass" style="border-radius:14px"><div class="av">${esc(initials(f.patient.name))}</div><div class="who"><b>${esc(f.patient.name)}</b></div>
       ${patient || move ? '' : '<button class="btn small soft" id="bk-chg">تغيير</button>'}</div>`
       : `<div class="searchbox">${IC.search}<input id="bk-q" placeholder="اسم المريض أو تليفونه"></div><div id="bk-res" class="list glass" style="margin-top:6px"></div>
-        <div class="muted" style="font-size:12px;margin-top:4px">المريض الجديد بيتسجل من البرنامج أو من الريسبشن.</div>`;
+        <button class="btn small soft" id="bk-new" style="margin-top:6px">+ مريض جديد</button>`;
     if ($('#bk-chg', el)) $('#bk-chg', el).onclick = () => { f.patient = null; drawPatient(); };
+    if ($('#bk-new', el)) $('#bk-new', el).onclick = () => {
+      $('#bk-p', el).innerHTML = `<div class="glass rx-row"><input id="np-n" placeholder="اسم المريض"><div class="grid2" style="margin-top:6px">
+        <input id="np-p" class="ltr" placeholder="الموبايل" inputmode="tel"><input id="np-a" placeholder="السن" inputmode="numeric"></div>
+        <button class="btn small" id="np-go" style="margin-top:8px">تسجيل</button></div>`;
+      $('#np-go', el).onclick = async () => {
+        try {
+          const name = $('#np-n', el).value.trim();
+          const r = await api('patient_new', { name, phone: $('#np-p', el).value, age: $('#np-a', el).value });
+          f.patient = { id: r.id, name }; drawPatient(); check();
+        } catch (e) { toast(e.message, true); }
+      };
+    };
     if ($('#bk-q', el)) {
       let t;
       $('#bk-q', el).oninput = (e) => { clearTimeout(t); t = setTimeout(async () => {
@@ -462,6 +523,7 @@ function sessionSheet(patientId, treatments, appointmentId) {
     <label class="lbl2">اللي اتعمل</label><textarea id="ss-p" rows="2"></textarea>
     <label class="lbl2">الخطوة الجاية</label><input id="ss-n">
     <button class="btn" id="ss-go">حفظ الجلسة</button>`);
+  dictateButton($('.sheet-body', el));
   let tid = null;
   $$('[data-t]', el).forEach((b) => (b.onclick = () => { tid = tid === b.dataset.t ? null : b.dataset.t; $$('[data-t]', el).forEach((x) => x.classList.toggle('on', x.dataset.t === tid)); }));
   $('#ss-go', el).onclick = async (e) => {
@@ -523,6 +585,173 @@ async function renderFollowups() {
   } catch (e) { $('#fu').innerHTML = failed(e); }
 }
 
+// ---------- القفل بالبصمة أو بالوش ----------
+// البصمة بتفتح الأبلكيشن على الموبايل ده، ومع كل فتحة التوكن بيتجدد، فالدكتور ما يكتبش الباسورد تاني
+const LOCK = {
+  open: false,
+  enabled: () => !!store.get(`lock:${ACC.key(S.session)}`),
+  supported: () => !!(window.PublicKeyCredential && navigator.credentials),
+  rand: (n = 32) => crypto.getRandomValues(new Uint8Array(n)),
+  async enable() {
+    const cred = await navigator.credentials.create({ publicKey: {
+      challenge: LOCK.rand(), rp: { name: 'Nabdify' },
+      user: { id: LOCK.rand(16), name: S.session.name, displayName: S.session.name },
+      pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+      authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'discouraged' }, timeout: 60000 } });
+    store.set(`lock:${ACC.key(S.session)}`, btoa(String.fromCharCode(...new Uint8Array(cred.rawId))));
+    LOCK.open = true;
+  },
+  async unlock() {
+    const id = Uint8Array.from(atob(store.get(`lock:${ACC.key(S.session)}`)), (c) => c.charCodeAt(0));
+    await navigator.credentials.get({ publicKey: { challenge: LOCK.rand(), allowCredentials: [{ type: 'public-key', id }], userVerification: 'required', timeout: 60000 } });
+    LOCK.open = true;
+    // تجديد التوكن (صالح 7 أيام من دلوقتي)
+    try { const r = await api('refresh'); useSession({ ...S.session, token: r.token, at: Date.now() }); } catch {}
+  },
+  disable: () => { store.del(`lock:${ACC.key(S.session)}`); },
+};
+function renderLock() {
+  $('#app').innerHTML = `<div class="login fade" style="text-align:center">
+    <img class="wordmark wm-dark" src="logo-white.svg" alt="Nabdify"><img class="wordmark wm-light" src="logo-dark-text.svg" alt="Nabdify">
+    <div class="tag">${esc(S.session.name)} · ${esc(S.session.clinic)}</div>
+    <button class="btn" id="lk-go">${IC.finger}افتح بالبصمة</button>
+    <div class="err" id="lk-err"></div>
+    <button class="btn soft" id="lk-pass">دخول بالباسورد بدل كده</button></div>`;
+  const go = async () => {
+    try { await LOCK.unlock(); render(); } catch { $('#lk-err').textContent = 'ما اتفتحش — جرب تاني'; }
+  };
+  $('#lk-go').onclick = go;
+  $('#lk-pass').onclick = () => { LOCK.disable(); logout(); };
+  go();
+}
+
+// ---------- ملخص الصبح (فوق شاشة النهارده) ----------
+async function morningCard() {
+  const el = $('#summary'); if (!el) return;
+  try {
+    const d = await api('summary', { date: S.date });
+    if (!$('#summary') || !d.count) return;
+    const lines = [];
+    lines.push(`<b>${num(d.count)} مريض</b>${d.first ? ` من ${fmtTime(d.first)} ${ampm(d.first)} لـ ${fmtTime(d.last)} ${ampm(d.last)}` : ''}`);
+    for (const a of d.alerts.slice(0, 4)) lines.push(`<span class="flag">${IC.alert}${esc(a.name)} (${fmtTime(a.time)}): ${esc(a.alert.replace(/^⚠\s*/, ''))}</span>`);
+    if (d.risky.length) lines.push(`احتمال ما يجوش (غابوا قبل كده): ${d.risky.map((r) => `<b>${esc(r.name)}</b>`).join('، ')} — أكّدوا معاهم`);
+    if (d.owing.length) lines.push(`عليهم فلوس: ${d.owing.slice(0, 3).map((o) => `${esc(o.name)} ${num(Math.round(o.balance))}`).join('، ')}`);
+    if (d.labs_due) lines.push(`${num(d.labs_due)} شغل معمل معاده جه`);
+    if (d.yesterday_no_show) lines.push(`${num(d.yesterday_no_show)} ما جوش امبارح`);
+    el.innerHTML = `<div class="glass card summary fade"><div class="lbl2" style="margin-bottom:6px">☀️ ملخص اليوم</div>${lines.map((l) => `<div>${l}</div>`).join('')}</div>`;
+  } catch {}
+}
+
+// ---------- رسايل واتساب للمريض ----------
+const WA_TEMPLATES = [
+  ['تذكير بالموعد', (n, a) => `أهلاً ${n}، معاك ${S.session.clinic}. بنفكّرك بميعادك ${a ? `${fmtDate(a.date || S.date, { weekday: 'long' })} الساعة ${fmtTime(a.time)} ${ampm(a.time)}` : ''}. مستنيينك 🌿`],
+  ['الدكتور هيتأخر شوية', (n) => `أهلاً ${n}، معاك ${S.session.clinic}. الدكتور هيتأخر حوالي نص ساعة النهارده، نعتذر جداً. لو تحب نأجل الميعاد كلّمنا.`],
+  ['جاهزين نستقبلك', (n) => `أهلاً ${n}، الدكتور جاهز دلوقتي، اتفضل على العيادة 🙏`],
+  ['بعد الجلسة', (n) => `أهلاً ${n}، نتمنى تكون بخير بعد الجلسة. لو حسيت بأي ألم أو حاجة مش طبيعية كلّمنا على طول.`],
+  ['متابعة علاج', (n) => `أهلاً ${n}، معاك ${S.session.clinic}. علاجك لسه ما خلصش، تحب نحجزلك الجلسة الجاية؟`],
+];
+const waLink = (phone, text) => `https://wa.me/${(phone || '').replace(/\D/g, '').replace(/^0/, '20')}?text=${encodeURIComponent(text)}`;
+function waSheet(name, phone, appt) {
+  const el = sheet(`رسالة واتساب لـ ${esc(name)}`, `
+    ${WA_TEMPLATES.map(([t], i) => `<a class="btn soft" data-wt="${i}" target="_blank" rel="noopener">${t}</a>`).join('')}
+    <button class="btn soft" id="wa-ai">${IC.spark}رسالة مخصوصة بالذكاء الاصطناعي</button>`);
+  $$('[data-wt]', el).forEach((a) => (a.href = waLink(phone, WA_TEMPLATES[+a.dataset.wt][1](name, appt))));
+  $('#wa-ai', el).onclick = async (e) => {
+    e.target.disabled = true;
+    try {
+      const r = await api('ai', { kind: 'followup_msg', name, reason: appt ? `موعد ${appt.service || ''}` : 'متابعة' });
+      window.open(waLink(phone, r.text), '_blank');
+    } catch (ex) { toast(aiError(ex), true); } finally { e.target.disabled = false; }
+  };
+}
+const aiError = (e) => (/ai_off/.test(e.message) ? 'الذكاء الاصطناعي لسه مش متفعّل — محتاج مفتاح من صاحب البرنامج' : e.message);
+
+// ---------- الإشعارات ----------
+const PUSH = {
+  supported: () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window,
+  on: () => !!store.get(`push:${ACC.key(S.session)}`),
+  async enable() {
+    if (await Notification.requestPermission() !== 'granted') throw new Error('لازم توافق على الإشعارات من الموبايل');
+    const { key } = await api('push_key');
+    if (!key) throw new Error('الإشعارات لسه مش جاهزة على السيرفر');
+    const reg = await navigator.serviceWorker.ready;
+    const raw = Uint8Array.from(atob(key.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((key.length + 3) % 4)), (c) => c.charCodeAt(0));
+    const sub = (await reg.pushManager.getSubscription()) || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: raw });
+    await api('push_sub', { sub: sub.toJSON() });
+    store.set(`push:${ACC.key(S.session)}`, sub.endpoint);
+  },
+  async disable() {
+    const endpoint = store.get(`push:${ACC.key(S.session)}`);
+    if (endpoint) await api('push_unsub', { endpoint }).catch(() => {});
+    store.del(`push:${ACC.key(S.session)}`);
+  },
+};
+
+// ---------- الأشعات والملفات (من السحابة) ----------
+const FILE_KIND = { xray: 'أشعة', photo: 'صورة', report: 'تقرير', other: 'ملف' };
+async function filesBody(el, patientId) {
+  el.innerHTML = loading(2);
+  try {
+    const { items } = await api('files', { patient_id: patientId });
+    el.innerHTML = items.length ? items.map((f) => `<button class="tr" data-f="${esc(f.cloud || '')}" style="width:100%;text-align:right">
+        <div><b>${esc(f.title || FILE_KIND[f.kind] || 'ملف')}</b><div class="muted">${FILE_KIND[f.kind] || ''} · ${fmtDate(f.date, { day: 'numeric', month: 'short', year: 'numeric' })}${f.tooth ? ` · سنة ${esc(f.tooth)}` : ''}</div></div>
+        <span class="muted">${f.cloud ? 'فتح' : 'لسه بيترفع'}</span></button>`).join('')
+      : '<div class="empty">مفيش أشعات أو ملفات</div>';
+    $$('[data-f]', el).forEach((b) => (b.onclick = async () => {
+      if (!b.dataset.f) return toast('الملف لسه ما اترفعش من البرنامج — هيتنقل مع المزامنة الجاية', true);
+      try { const { url } = await api('file_url', { path: b.dataset.f }); window.open(url, '_blank'); } catch (e) { toast(e.message, true); }
+    }));
+  } catch (e) { el.innerHTML = failed(e); }
+}
+
+// ---------- اسأل عيادتك ----------
+function askSheet() {
+  const el = sheet('اسأل عيادتك', `
+    <div class="muted">مثلاً: كام دخلنا الشهر ده مقارنة باللي فات؟ أكتر خدمة جابت فلوس؟ كام مريض جديد؟</div>
+    <textarea id="ask-q" rows="2" placeholder="اكتب سؤالك…"></textarea>
+    <button class="btn" id="ask-go">${IC.spark}اسأل</button>
+    <div id="ask-a" class="glass card" style="display:none;white-space:pre-line;line-height:1.8"></div>`);
+  $('#ask-go', el).onclick = async (e) => {
+    const q = $('#ask-q', el).value.trim(); if (!q) return;
+    e.target.disabled = true; $('#ask-a', el).style.display = 'block'; $('#ask-a', el).textContent = 'بيفكر…';
+    try { $('#ask-a', el).textContent = (await api('ai', { kind: 'ask', question: q })).answer; }
+    catch (ex) { $('#ask-a', el).textContent = aiError(ex); } finally { e.target.disabled = false; }
+  };
+}
+
+// ---------- الإملاء بالصوت (في تسجيل الجلسة) ----------
+// تحويل الصوت لكلام من الموبايل نفسه (مجاني)، والترتيب في خانات بالذكاء الاصطناعي لو متفعّل
+function dictateButton(box) {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return;
+  const btn = document.createElement('button');
+  btn.className = 'btn soft'; btn.innerHTML = `${IC.mic}املي بصوتك`;
+  box.prepend(btn);
+  let rec = null, text = '';
+  btn.onclick = async () => {
+    if (rec) { rec.stop(); return; }
+    rec = new SR(); rec.lang = 'ar-EG'; rec.continuous = true; rec.interimResults = false;
+    text = ''; btn.innerHTML = `${IC.mic}بيسمع… دوس تاني لما تخلص`; btn.classList.add('rec');
+    rec.onresult = (e) => { for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) text += `${e.results[i][0].transcript} `; };
+    rec.onend = async () => {
+      rec = null; btn.classList.remove('rec'); btn.innerHTML = `${IC.mic}املي بصوتك`;
+      if (!text.trim()) return;
+      $('#ss-p', box).value = [$('#ss-p', box).value, text.trim()].filter(Boolean).join('\n');
+      try {
+        btn.innerHTML = `${IC.spark}بيرتب الكلام…`;
+        const { fields } = await api('ai', { kind: 'dictate', text });
+        if (fields.complaint) $('#ss-c', box).value = fields.complaint;
+        if (fields.diagnosis) $('#ss-d', box).value = fields.diagnosis;
+        if (fields.procedure) $('#ss-p', box).value = fields.procedure;
+        if (fields.next_step) $('#ss-n', box).value = fields.next_step;
+        if (fields.rx?.length) toast(`الدكتور ذكر ${fields.rx.length} دوا — اكتبهم في الروشتة`);
+      } catch (e) { if (!/ai_off/.test(e.message)) toast(e.message, true); }
+      btn.innerHTML = `${IC.mic}املي بصوتك`;
+    };
+    rec.start();
+  };
+}
+
 // ---------- وضع العرض التجريبي (?demo) — بيانات وهمية من غير سيرفر ----------
 function demo(action, data) {
   const pts = [['p1', 'أحمد محمود', '01012345678', null], ['p2', 'منى السيد', '01198765432', '⚠ بنسلين · ضغط عالي'], ['p3', 'كريم عادل', '01022223333', null],
@@ -532,12 +761,20 @@ function demo(action, data) {
     meta: () => ({ services: [{ id: 's1', name: 'كشف', duration: 15 }, { id: 's2', name: 'حشو عادي', duration: 30 }, { id: 's3', name: 'خلع', duration: 30 }], doctors: [{ id: 'd1', name: 'د. أحمد سعيد', me: true }] }),
     slots: () => ({ closed: false, slots: ['10:00', '10:30', '11:00', '12:00', '13:30', '17:00', '18:15'].map((time) => ({ time, free: true, chair_id: 'c1' })) }),
     write: () => ({ ok: true }),
+    summary: () => ({ count: 5, first: '10:00', last: '12:15', alerts: [{ name: 'منى السيد', time: '10:30', alert: '⚠ بنسلين · ضغط عالي' }],
+      risky: [{ name: 'كريم عادل', time: '11:00', missed: 2 }], owing: [{ name: 'منى السيد', balance: 950 }], labs_due: 1, yesterday_no_show: 1 }),
+    files: () => ({ items: [{ id: 'f1', title: 'بانوراما', kind: 'xray', date: addDays(today(), -10), cloud: 'x/f1' }, { id: 'f2', kind: 'photo', date: addDays(today(), -3), cloud: null }] }),
+    file_url: () => ({ url: 'icon-512.png' }),
+    patient_new: () => ({ id: 'p9' }),
+    refresh: () => ({ token: 'demo' }),
+    push_key: () => ({ key: null }),
+    ai: () => Promise.reject(new Error('ai_off')),
     followups: () => ({ unfinished: [{ patient_id: 'p2', name: 'منى السيد', phone: '01198765432', detail: 'حشو عصب 2/3' }], no_shows: [{ patient_id: 'p3', name: 'كريم عادل', phone: '01022223333', date: addDays(today(), -5) }] }),
     login: () => ({ token: 'demo', name: 'د. أحمد سعيد', clinic: 'عيادة تجريبية' }),
     me: () => ({ last_sync: new Date(Date.now() - 120000).toISOString() }),
     day: () => ({ items: [['10:00', 'p1', 'done', 'حشو عصب', 'كرسي 1'], ['10:30', 'p2', 'inside', 'خلع', 'كرسي 2'], ['11:00', 'p3', 'waiting', 'كشف', 'كرسي 1'],
       ['11:30', 'p4', 'booked', 'تنظيف جير', 'كرسي 2'], ['12:15', 'p5', 'booked', 'تركيب طربوش', 'كرسي 1']]
-      .map(([time, id, status, service, chair], i) => ({ id: `a${i}`, time, status, service, chair, patient_id: id, patient: P(id)[1], alert: P(id)[3], doctor: 'د. أحمد سعيد' })) }),
+      .map(([time, id, status, service, chair], i) => ({ id: `a${i}`, time, status, service, chair, patient_id: id, patient: P(id)[1], phone: P(id)[2], alert: P(id)[3], doctor: 'د. أحمد سعيد' })) }),
     search: () => ({ items: pts.filter((p) => p[1].includes(data.q) || p[2].includes(data.q)).map(([id, name, phone, alert], i) => ({ id, name, phone, alert, file_no: 40 + i })) }),
     patient: () => { const [, name, phone, alert] = P(data.id); return { patient: { name, phone, alert, file_no: 48, age: 34, medications: alert ? 'سيولة' : null }, balance: 950,
       treatments: [{ id: 't1', description: 'حشو عصب', tooth: '36', done: 2, total: 3, status: 'in_progress' }, { description: 'طربوش بورسلين', tooth: '36', done: 0, total: 1, status: 'planned' }, { description: 'تنظيف جير', done: 1, total: 1, status: 'done' }],
