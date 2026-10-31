@@ -241,3 +241,9 @@ svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width:
 .btn svg, .act svg, .tr span svg { width: 17px; height: 17px; vertical-align: -3px; margin-inline-end: 4px; }
 .btn.rec { background: var(--redbg); color: var(--red); border-color: rgba(255,107,107,.4); }
 a.btn { display: block; text-decoration: none; }
+/* جرس الإشعارات */
+.iconbtn .badge { position: absolute; top: -4px; inset-inline-start: -4px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 99px; background: var(--red);
+  color: #fff; font-size: 10px; font-weight: 700; font-style: normal; display: grid; place-items: center; box-shadow: 0 0 0 2px var(--bg); }
+.iconbtn .badge[hidden] { display: none; }
+.notif.new { background: rgba(var(--a-rgb), .08); } .notif.new b::after { content: ''; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--a); margin-inline-start: 6px; vertical-align: middle; }
+.notif .av svg { width: 18px; height: 18px; }

@@ -162,7 +162,7 @@ function renderLogin() {
 // ---------- الإطار ----------
 const TABS = { day: 'النهارده', patients: 'المرضى', money: 'الفلوس', me: 'حسابي' };
 function shell(top, main) {
-  $('#app').innerHTML = `<header class="top"><div class="tools"><button class="iconbtn" id="themebtn"></button><button class="iconbtn sync" id="syncchip" aria-label="تحديث"></button></div>${top}</header>
+  $('#app').innerHTML = `<header class="top"><div class="tools"><button class="iconbtn" id="bellbtn" aria-label="الإشعارات">${IC.bell}<i class="badge" hidden></i></button><button class="iconbtn" id="themebtn"></button><button class="iconbtn sync" id="syncchip" aria-label="تحديث"></button></div>${top}</header>
     <main class="main" id="main">${SYNC.offline ? '<div class="offline">مفيش نت · بتشوف آخر بيانات اتحملت</div>' : ''}${main}</main>
     <nav class="nav">${Object.entries(TABS).map(([k, t]) => `<button data-tab="${k}" class="${S.tab === k && !S.patient ? 'on' : ''}">${IC[k]}${t}</button>`).join('')}</nav>`;
   $$('[data-tab]').forEach((b) => (b.onclick = () => { S.tab = b.dataset.tab; S.patient = null; window.scrollTo(0, 0); render(); }));
@@ -174,13 +174,16 @@ function shell(top, main) {
     store.set('theme', t); applyTheme(t); drawTheme();
     if (S.tab === 'me' && !S.patient) renderMe();
   };
+  $('#bellbtn').onclick = notifSheet;
+  NOTIF.badge();
   // الضغط على علامة المزامنة = تحديث الشاشة
   $('#syncchip').onclick = () => { refreshSync(true); render(); };
   refreshSync();
 }
 // تحديث تلقائي كل دقيقة لشاشة النهارده (لما الأبلكيشن قدامك بس)
 setInterval(() => { if (S.session && S.tab === 'day' && !S.patient && document.visibilityState === 'visible') { refreshSync(true); renderDay(true); } }, 60e3);
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.session) { refreshSync(true); render(); } });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.session) { refreshSync(true); NOTIF.checked = 0; render(); } });
+navigator.serviceWorker?.addEventListener('message', (e) => { if (e.data === 'push' && S.session) { NOTIF.badge(true); if (S.tab === 'day' && !S.patient) renderDay(true); } });
 const loading = (n = 4) => Array.from({ length: n }, () => '<div class="skel"></div>').join('');
 const failed = (e) => `<div class="empty">${esc(e.message)}<br><br><button class="btn small retry">جرّب تاني</button></div>`;
 const flag = (t) => (t ? `<div><span class="flag">${IC.alert}${esc(t.replace(/^⚠\s*/, ''))}</span></div>` : '');
@@ -625,6 +628,38 @@ function renderLock() {
   go();
 }
 
+// ---------- جرس الإشعارات جوه الأبلكيشن ----------
+// نفس الإشعارات اللي بتوصل على الموبايل، محفوظة آخر 7 أيام، والجديد عليه علامة
+const NOTIF = {
+  items: [], checked: 0,
+  seenKey: () => `notif_seen:${ACC.key(S.session)}`,
+  unread: () => NOTIF.items.filter((n) => n.id > (store.get(NOTIF.seenKey()) || 0)).length,
+  async load(force) {
+    if (!force && Date.now() - NOTIF.checked < 60e3) return;
+    try { NOTIF.items = (await api('notifications')).items || []; NOTIF.checked = Date.now(); } catch {}
+  },
+  async badge(force) {
+    await NOTIF.load(force);
+    const b = $('#bellbtn .badge'); if (!b) return;
+    const n = NOTIF.unread();
+    b.hidden = !n; b.textContent = n > 9 ? '9+' : n || '';
+  },
+};
+async function notifSheet() {
+  await NOTIF.load(true);
+  const seen = store.get(NOTIF.seenKey()) || 0;
+  const ago = (t) => { const m = Math.round((Date.now() - new Date(t)) / 6e4); return m < 1 ? 'دلوقتي' : m < 60 ? `من ${num(m)} د` : m < 1440 ? `من ${num(Math.round(m / 60))} س` : fmtDate(new Date(t).toLocaleDateString('en-CA'), { weekday: 'short', day: 'numeric', month: 'short' }); };
+  const el = sheet('الإشعارات', NOTIF.items.length ? `<div class="list glass">${NOTIF.items.map((n) => `<button class="prow notif ${n.id > seen ? 'new' : ''}" data-nd="${esc(n.date || '')}">
+      <div class="av">${IC.bell}</div><div class="who"><b>${esc(n.title)}</b><span>${esc(n.body)}</span></div><span class="muted" style="white-space:nowrap">${ago(n.at)}</span></button>`).join('')}</div>`
+    : `<div class="empty">مفيش إشعارات في آخر أسبوع</div>${PUSH.supported() && !PUSH.on() ? '<div class="muted" style="text-align:center">شغّل الإشعارات من "حسابي" عشان توصلك على الموبايل كمان</div>' : ''}`);
+  if (NOTIF.items.length) store.set(NOTIF.seenKey(), NOTIF.items[0].id);
+  NOTIF.badge();
+  $$('[data-nd]', el).forEach((b) => (b.onclick = () => {
+    closeSheet();
+    if (b.dataset.nd) { S.date = b.dataset.nd; S.tab = 'day'; S.patient = null; render(); }
+  }));
+}
+
 // ---------- ملخص الصبح (فوق شاشة النهارده) ----------
 async function morningCard() {
   const el = $('#summary'); if (!el) return;
@@ -761,6 +796,9 @@ function demo(action, data) {
     meta: () => ({ services: [{ id: 's1', name: 'كشف', duration: 15 }, { id: 's2', name: 'حشو عادي', duration: 30 }, { id: 's3', name: 'خلع', duration: 30 }], doctors: [{ id: 'd1', name: 'د. أحمد سعيد', me: true }] }),
     slots: () => ({ closed: false, slots: ['10:00', '10:30', '11:00', '12:00', '13:30', '17:00', '18:15'].map((time) => ({ time, free: true, chair_id: 'c1' })) }),
     write: () => ({ ok: true }),
+    notifications: () => ({ items: [{ id: 3, title: 'المريض وصل', body: 'منى السيد وصل العيادة (ميعاده 10:30)', at: new Date(Date.now() - 4 * 6e4).toISOString(), date: today() },
+      { id: 2, title: 'حجز أونلاين جديد', body: 'سارة علي — ' + addDays(today(), 1) + ' 11:30', at: new Date(Date.now() - 50 * 6e4).toISOString(), date: addDays(today(), 1) },
+      { id: 1, title: 'موعد اتلغى', body: 'كريم عادل — ' + today() + ' 11:00', at: new Date(Date.now() - 26 * 36e5).toISOString(), date: today() }] }),
     summary: () => ({ count: 5, first: '10:00', last: '12:15', alerts: [{ name: 'منى السيد', time: '10:30', alert: '⚠ بنسلين · ضغط عالي' }],
       risky: [{ name: 'كريم عادل', time: '11:00', missed: 2 }], owing: [{ name: 'منى السيد', balance: 950 }], labs_due: 1, yesterday_no_show: 1 }),
     files: () => ({ items: [{ id: 'f1', title: 'بانوراما', kind: 'xray', date: addDays(today(), -10), cloud: 'x/f1' }, { id: 'f2', kind: 'photo', date: addDays(today(), -3), cloud: null }] }),
