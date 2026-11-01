@@ -29,7 +29,7 @@ async function start() {
   document.title = `حجز موعد — ${info.clinic}`;
   const today = iso(new Date());
   const days = Array.from({ length: 14 }, (_, i) => addDays(today, i));
-  const off = (d) => (info.days_off || []).includes(new Date(`${d}T12:00:00`).getDay());
+  const off = (d) => (info.days_off || []).includes(new Date(`${d}T12:00:00`).getDay()) || (info.closed || []).includes(d);
   f.date = days.find((d) => !off(d));
   const last = store.get(`booking:${slug}`);
   $('#hero').innerHTML = `<div class="av">${esc(initials(info.clinic))}</div><div><b>${esc(info.clinic)}</b>

@@ -247,3 +247,7 @@ a.btn { display: block; text-decoration: none; }
 .iconbtn .badge[hidden] { display: none; }
 .notif.new { background: rgba(var(--a-rgb), .08); } .notif.new b::after { content: ''; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--a); margin-inline-start: 6px; vertical-align: middle; }
 .notif .av svg { width: 18px; height: 18px; }
+/* لوجو Nabdify صغير فوق في كل الشاشات */
+.brandmark { height: 22px; margin-bottom: 10px; } .brandmark img { height: 100%; width: auto; display: block; }
+.brandmark .wm-light { display: none; }
+:root[data-theme="light"] .brandmark .wm-dark { display: none; } :root[data-theme="light"] .brandmark .wm-light { display: block; }

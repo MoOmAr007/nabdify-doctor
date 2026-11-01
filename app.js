@@ -162,7 +162,7 @@ function renderLogin() {
 // ---------- الإطار ----------
 const TABS = { day: 'النهارده', patients: 'المرضى', money: 'الفلوس', me: 'حسابي' };
 function shell(top, main) {
-  $('#app').innerHTML = `<header class="top"><div class="tools"><button class="iconbtn" id="bellbtn" aria-label="الإشعارات">${IC.bell}<i class="badge" hidden></i></button><button class="iconbtn" id="themebtn"></button><button class="iconbtn sync" id="syncchip" aria-label="تحديث"></button></div>${top}</header>
+  $('#app').innerHTML = `<header class="top"><div class="brandmark"><img class="wm-dark" src="logo-white.svg" alt="Nabdify"><img class="wm-light" src="logo-dark-text.svg" alt="Nabdify"></div><div class="tools"><button class="iconbtn" id="bellbtn" aria-label="الإشعارات">${IC.bell}<i class="badge" hidden></i></button><button class="iconbtn" id="themebtn"></button><button class="iconbtn sync" id="syncchip" aria-label="تحديث"></button></div>${top}</header>
     <main class="main" id="main">${SYNC.offline ? '<div class="offline">مفيش نت · بتشوف آخر بيانات اتحملت</div>' : ''}${main}</main>
     <nav class="nav">${Object.entries(TABS).map(([k, t]) => `<button data-tab="${k}" class="${S.tab === k && !S.patient ? 'on' : ''}">${IC[k]}${t}</button>`).join('')}</nav>`;
   $$('[data-tab]').forEach((b) => (b.onclick = () => { S.tab = b.dataset.tab; S.patient = null; window.scrollTo(0, 0); render(); }));
@@ -496,7 +496,7 @@ async function bookSheet({ patient, move, date }) {
     const dur = move ? move.duration || 30 : meta.services.find((x) => x.id === f.service)?.duration || 30;
     const r = await api('slots', { date: f.date, duration: dur, doctor_id: f.doctor });
     const free = r.slots.filter((x) => x.free);
-    $('#bk-slots', el).innerHTML = r.closed ? '<div class="muted">العيادة أجازة اليوم ده</div>'
+    $('#bk-slots', el).innerHTML = r.closed ? `<div class="muted">العيادة مقفولة اليوم ده (${esc(r.reason || 'أجازة')})</div>`
       : free.length ? free.map((x) => `<button data-t="${x.time}" data-c="${x.chair_id}">${fmtTime(x.time)} ${ampm(x.time)}</button>`).join('') : '<div class="muted">مفيش مواعيد فاضية</div>';
     $$('[data-t]', el).forEach((b) => (b.onclick = () => { f.time = b.dataset.t; f.chair = b.dataset.c; $$('[data-t]', el).forEach((x) => x.classList.toggle('on', x === b)); check(); }));
   };

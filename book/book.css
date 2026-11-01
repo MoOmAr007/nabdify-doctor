@@ -4,7 +4,7 @@ body { background: var(--bg); background-image: none; }
 .bk-hero:empty { min-height: 90px; }
 .bk-hero .av { width: 50px; height: 50px; border-radius: 15px; background: rgba(255,255,255,.15); display: grid; place-items: center; font-weight: 700; flex-shrink: 0; }
 .bk-hero b { display: block; font-size: 19px; } .bk-hero span { display: block; font-size: 12px; opacity: .85; line-height: 1.6; }
-.bk { max-width: 520px; margin: 0 auto; padding: 14px 14px 130px; display: flex; flex-direction: column; gap: 10px; }
+.bk { max-width: 520px; margin: 0 auto; padding: 14px 14px 8px; display: flex; flex-direction: column; gap: 10px; }
 .step { background: #fff; border: 1px solid var(--line); border-radius: 18px; padding: 12px 14px; }
 .step.mine { background: #fff8db; border-color: #f2dd8c; font-size: 14px; display: flex; gap: 8px; align-items: center; justify-content: space-between; }
 .lbl { font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
@@ -38,4 +38,5 @@ body { background: var(--bg); background-image: none; }
 .ok .when { background: #fff; border: 1px solid var(--line); border-radius: 18px; padding: 14px; width: 100%; } .ok .when b { display: block; font-size: 18px; color: #0F6E56; }
 .ok .when span, .ok .muted { color: var(--m); font-size: 12.5px; line-height: 1.7; }
 .err { color: #c94141; text-align: center; font-size: 13px; }
-.bk-foot { text-align: center; color: var(--m); font-size: 12px; padding: 4px 0 120px; } .bk-foot img { height: 16px; vertical-align: -3px; margin-inline-start: 4px; }
+.bk-foot { text-align: center; color: var(--m); font-size: 12px; padding: 0 0 calc(118px + env(safe-area-inset-bottom)); } .bk-foot img { height: 18px; vertical-align: -3px; margin-inline-start: 4px; }
+.bk .err:empty { display: none; }
