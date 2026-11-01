@@ -26,39 +26,61 @@ const store = {
 const ACC = {
   list: () => { const l = store.get('sessions'); if (Array.isArray(l)) return l; const old = store.get('session'); return old ? [old] : []; },
   save: (l) => { store.set('sessions', l); store.del('session'); },
-  key: (x) => `${x.clinic}|${x.name}`,
+  // الحساب بيتعرف برقم العيادة ورقم المستخدم (مش بالاسم)، عشان عيادتين أو دكتورين بنفس الاسم ما يتلخبطوش
+  key: (x) => { const id = ACC.ids(x); return id ? `${id.c}:${id.u}` : `name:${x.clinic}|${x.name}`; },
+  ids: (x) => {
+    if (x?.clinic_id && x?.user_id) return { c: x.clinic_id, u: x.user_id };
+    try { const p = JSON.parse(atob(x.token.split('.')[0].replace(/-/g, '+').replace(/_/g, '/'))); return p.c && p.u ? { c: p.c, u: p.u } : null; } catch { return null; }
+  },
+  oldKey: (x) => `${x.clinic}|${x.name}`,
 };
+// ترقية: الكاش القديم كان متفصّل بالاسم، فبيتمسح كله. البصمة والإشعارات بتتنقل للمفتاح الجديد
+if (!store.get('acc_v2')) {
+  try {
+    Object.keys(localStorage).filter((k) => k.startsWith('cache:')).forEach((k) => localStorage.removeItem(k));
+    for (const x of ACC.list()) for (const p of ['lock:', 'push:', 'notif_seen:']) {
+      const v = store.get(p + ACC.oldKey(x));
+      if (v != null && store.get(p + ACC.key(x)) == null) store.set(p + ACC.key(x), v);
+    }
+    for (const x of ACC.list()) for (const p of ['lock:', 'push:', 'notif_seen:']) store.del(p + ACC.oldKey(x));
+  } catch {}
+  store.set('acc_v2', 1);
+}
 const S = { session: ACC.list()[store.get('current') || 0] || ACC.list()[0] || null, tab: 'day', date: today(), q: '', patient: null, ptab: 'plan', range: 'day' };
 function useSession(sess) {
   const l = ACC.list().filter((x) => ACC.key(x) !== ACC.key(sess)); l.unshift(sess); ACC.save(l); store.set('current', 0);
   S.session = sess; S.patient = null; S.tab = 'day'; SYNC.at = null; SYNC.checked = 0;
 }
 
-// آخر نتيجة لكل طلب بتتحفظ على الموبايل، فلو النت قطع بنعرضها ومعاها تنبيه
+// القراية بس بتتحفظ على الموبايل، فلو النت قطع بنعرضها ومعاها تاريخها.
+// أي تعديل (حجز، جلسة، مريض جديد…) لازم يوصل السيرفر، وإلا بيرجع غلط وما بنعرضش نجاح قديم
+const CACHED = new Set(['day', 'search', 'patient', 'money', 'me', 'followups', 'notifications', 'files', 'summary', 'slots', 'meta']);
+const cachePrefix = (sess) => `cache2:${ACC.key(sess || {})}:`;
 async function api(action, data = {}) {
   if (DEMO) return demo(action, data);
-  const key = `cache:${S.session?.clinic || ''}:${action}:${JSON.stringify(data)}`;
+  const cacheable = CACHED.has(action) && S.session;
+  const key = cacheable && cachePrefix(S.session) + `${action}:${JSON.stringify(data)}`;
   let r;
   try {
     r = await fetch(FN, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(S.session ? { Authorization: `Bearer ${S.session.token}` } : {}) },
       body: JSON.stringify({ action, ...data }) });
   } catch {
-    const cached = action !== 'login' && store.get(key);
-    if (cached) { setOffline(true); return cached; }
     setOffline(true);
-    throw new Error('مفيش اتصال بالنت');
+    const cached = cacheable && store.get(key);
+    if (cached?.body) { SYNC.cachedAt = cached.at; drawSync(); return { ...cached.body, _cachedAt: cached.at }; }
+    throw new Error(cacheable ? 'مفيش اتصال بالنت' : 'مفيش اتصال بالنت، وما اتحفظش حاجة. جرّب تاني لما النت يرجع');
   }
   const body = await r.json().catch(() => ({}));
   if (r.status === 401 && body.error === 'relogin') { logout(); throw new Error('سجّل دخول تاني'); }
   if (!r.ok) throw new Error(body.error || 'حصلت مشكلة');
   setOffline(false);
-  if (action !== 'login' && action !== 'ping') store.set(key, body);
+  if (cacheable) store.set(key, { at: Date.now(), body });
   return body;
 }
 // خروج من العيادة الحالية بس (لو فيه عيادة تانية بنرجعلها)
 function logout() {
   const cur = S.session;
-  try { Object.keys(localStorage).filter((k) => k.startsWith(`cache:${cur?.clinic || ''}:`)).forEach((k) => localStorage.removeItem(k)); } catch {}
+  try { if (cur) Object.keys(localStorage).filter((k) => k.startsWith(cachePrefix(cur))).forEach((k) => localStorage.removeItem(k)); } catch {}
   const rest = ACC.list().filter((x) => !cur || ACC.key(x) !== ACC.key(cur)); ACC.save(rest); store.set('current', 0);
   S.session = rest[0] || null; S.patient = null; S.tab = 'day';
   render();
@@ -76,12 +98,12 @@ function applyTheme(t = theme()) {
 applyTheme();
 
 // ---------- علامة المزامنة ----------
-const SYNC = { at: null, checked: 0, offline: false };
-function setOffline(v) { if (SYNC.offline !== v) { SYNC.offline = v; drawSync(); } }
+const SYNC = { at: null, checked: 0, offline: false, cachedAt: null };
+function setOffline(v) { if (!v) SYNC.cachedAt = null; if (SYNC.offline !== v) { SYNC.offline = v; drawSync(); } }
 function drawSync(busy) {
   const el = $('#syncchip'); if (!el) return;
   let txt = '…', cls = '';
-  if (SYNC.offline) { txt = 'أوفلاين'; cls = 'off'; }
+  if (SYNC.offline) { txt = SYNC.cachedAt ? `أوفلاين · نسخة محفوظة من ${new Date(SYNC.cachedAt).toLocaleString('ar-EG')}` : 'أوفلاين'; cls = 'off'; }
   else if (SYNC.at) {
     const mins = Math.max(0, Math.round((Date.now() - new Date(SYNC.at)) / 6e4));
     txt = mins < 2 ? 'متزامن دلوقتي' : mins < 60 ? `من ${num(mins)} د` : mins < 1440 ? `من ${num(Math.round(mins / 60))} س` : `من ${num(Math.round(mins / 1440))} يوم`;
@@ -151,7 +173,7 @@ function renderLogin() {
     $('#lb').disabled = true; $('#lb').textContent = 'بيدخل…'; $('#le').textContent = '';
     try {
       const r = await api('login', f);
-      useSession({ token: r.token, name: r.name, clinic: r.clinic, at: Date.now() });
+      useSession({ token: r.token, name: r.name, clinic: r.clinic, clinic_id: r.clinic_id, user_id: r.user_id, at: Date.now() });
       store.set('last_login', { email: f.email, username: f.username });
       S.adding = false;
       render();

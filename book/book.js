@@ -82,11 +82,15 @@ function check(show) {
   return ok;
 }
 
+// كل طلب مواعيد بياخد رقم، والرد اللي مش بتاع آخر طلب (يوم أو خدمة اتغيروا بعده) بيتجاهل
+let slotsReq = 0;
 async function slots() {
+  const req = ++slotsReq;
   f.time = null; check();
   $('#tm').innerHTML = '<div class="muted">بيحمّل…</div>';
   try {
     const r = await call('slots', { date: f.date, service_id: f.service || null });
+    if (req !== slotsReq) return;
     if (r.closed) { $('#tm').innerHTML = '<div class="muted">العيادة أجازة اليوم ده</div>'; return; }
     if (!r.times.length) { $('#tm').innerHTML = '<div class="muted">مفيش مواعيد فاضية — جرب يوم تاني</div>'; return; }
     const am = r.times.filter((t) => hm(t)[0] < 15), pm = r.times.filter((t) => hm(t)[0] >= 15);
@@ -96,7 +100,7 @@ async function slots() {
       f.time = b.dataset.t; $$('[data-t]').forEach((x) => x.classList.toggle('on', x === b)); check();
       $('#s4').scrollIntoView({ behavior: 'smooth', block: 'start' });
     }));
-  } catch (e) { $('#tm').innerHTML = `<div class="muted">${esc(e.message)}</div>`; }
+  } catch (e) { if (req === slotsReq) $('#tm').innerHTML = `<div class="muted">${esc(e.message)}</div>`; }
 }
 
 async function book() {
