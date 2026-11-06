@@ -1,5 +1,5 @@
 // بيخزن ملفات الأبلكيشن عشان يفتح بسرعة. البيانات نفسها دايماً من السيرفر (ما بتتخزنش هنا).
-const CACHE = 'nabdify-doctor-v11';
+const CACHE = 'nabdify-doctor-v12';
 const FILES = ['./', 'index.html', 'app.css', 'app.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon.svg', 'logo-white.svg', 'logo-dark-text.svg',
   'fonts/cairo-arabic-400-normal.woff2', 'fonts/cairo-arabic-600-normal.woff2', 'fonts/cairo-arabic-700-normal.woff2',
   'fonts/cairo-latin-400-normal.woff2', 'fonts/cairo-latin-700-normal.woff2'];

@@ -80,6 +80,7 @@ async function api(action, data = {}) {
 // خروج من العيادة الحالية بس (لو فيه عيادة تانية بنرجعلها)
 function logout() {
   const cur = S.session;
+  if (cur) PUSH.forget(cur);
   try { if (cur) Object.keys(localStorage).filter((k) => k.startsWith(cachePrefix(cur))).forEach((k) => localStorage.removeItem(k)); } catch {}
   const rest = ACC.list().filter((x) => !cur || ACC.key(x) !== ACC.key(cur)); ACC.save(rest); store.set('current', 0);
   S.session = rest[0] || null; S.patient = null; S.tab = 'day';
@@ -213,6 +214,7 @@ const flag = (t) => (t ? `<div><span class="flag">${IC.alert}${esc(t.replace(/^�
 function render() {
   if (!S.session || S.adding) return renderLogin();
   if (LOCK.enabled() && !LOCK.open) return renderLock();
+  PUSH.resync();
   if (S.patient) return renderPatient();
   ({ day: renderDay, patients: renderPatients, money: renderMoney, me: renderMe })[S.tab]();
 }
@@ -510,13 +512,22 @@ async function bookSheet({ patient, move, date }) {
     }
   };
   const check = () => ($('#bk-go', el).disabled = !(f.patient && f.time));
+  // لو اليوم أو الخدمة أو الدكتور اتغيروا قبل ما الرد يرجع، الرد القديم بيتساب
+  // (وكمان لو الشباك اتقفل)، عشان ما يعرضش مواعيد يوم تاني أو يلغي اختيار الدكتور
+  let slotsReq = 0;
   const loadSlots = async () => {
+    const req = ++slotsReq;
     $('#bk-date', el).textContent = fmtDate(f.date, { weekday: 'long', day: 'numeric', month: 'long' });
     $('#bk-pick', el).value = f.date;
     $('#bk-slots', el).innerHTML = '<div class="muted">بيحمّل…</div>';
     f.time = null; check();
     const dur = move ? move.duration || 30 : meta.services.find((x) => x.id === f.service)?.duration || 30;
-    const r = await api('slots', { date: f.date, duration: dur, doctor_id: f.doctor });
+    let r;
+    try { r = await api('slots', { date: f.date, duration: dur, doctor_id: f.doctor }); } catch (e) {
+      if (req === slotsReq && el.isConnected) $('#bk-slots', el).innerHTML = `<div class="muted">${esc(e.message)}</div>`;
+      return;
+    }
+    if (req !== slotsReq || !el.isConnected) return;
     const free = r.slots.filter((x) => x.free);
     $('#bk-slots', el).innerHTML = r.closed ? `<div class="muted">العيادة مقفولة اليوم ده (${esc(r.reason || 'أجازة')})</div>`
       : free.length ? free.map((x) => `<button data-t="${x.time}" data-c="${x.chair_id}">${fmtTime(x.time)} ${ampm(x.time)}</button>`).join('') : '<div class="muted">مفيش مواعيد فاضية</div>';
@@ -741,6 +752,27 @@ const PUSH = {
     const endpoint = store.get(`push:${ACC.key(S.session)}`);
     if (endpoint) await api('push_unsub', { endpoint }).catch(() => {});
     store.del(`push:${ACC.key(S.session)}`);
+  },
+  // خروج الحساب: نلغي اشتراكه هو بس على السيرفر (الإلغاء متفلتر بالمستخدم)، من غير ما نلغي اشتراك المتصفح
+  // نفسه عشان أي حساب تاني على نفس الموبايل يفضل شغال. بنكلم السيرفر مباشرة مش من api() عشان
+  // الخروج بسبب "سجّل دخول تاني" ما يعملش خروج تاني. ولو فشل، السيرفر نفسه بيمنع الإرسال للحساب ده
+  forget(acc) {
+    const k = `push:${ACC.key(acc)}`, endpoint = store.get(k);
+    store.del(k);
+    if (!endpoint || DEMO) return;
+    fetch(FN, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${acc.token}` },
+      body: JSON.stringify({ action: 'push_unsub', endpoint }) }).catch(() => {});
+  },
+  // أول ما الحساب يتفتح: لو الإشعارات شغالة عنده، الاشتراك بيتجدد على السيرفر (بتوكن جديد وبصمة كلمة سر جديدة)
+  done: new Set(),
+  async resync() {
+    const k = ACC.key(S.session);
+    if (DEMO || PUSH.done.has(k) || !PUSH.supported() || !PUSH.on()) return;
+    PUSH.done.add(k);
+    try {
+      const sub = await (await navigator.serviceWorker.ready).pushManager.getSubscription();
+      if (sub && sub.endpoint === store.get(`push:${k}`)) await api('push_sub', { sub: sub.toJSON() });
+    } catch {}
   },
 };
 
